@@ -1,0 +1,39 @@
+#!/bin/bash
+# $Id: ldap_ssh_key.sh 138 2013-09-14 08:24:39Z jmorano $
+#
+# Check if the user is in the right group
+#  and afterwards retrieve the SSH public key from LDAP
+# Logs directly in Syslog
+#
+# sshd_config for OpenSSH 6.2 or higher:
+#
+#  AuthorizedKeysCommand /usr/local/bin/ldap_keys.sh
+#  AuthorizedKeysCommandUser nobody
+#
+  
+LDAP_SERVER="<%= node['openldap']['server'] %>"
+BASE_DN="<%= node['openldap']['basedn'] %>"
+ALLOWED_GROUP="<%= node['serv']['ldap_auth']['ldap_ssh_keys']['allowed_group'] %>"
+  
+# load local configuration if available
+if [ -f /etc/ldap/ldap-ssh-key.cfg ]; then
+    . /etc/ldap/ldap-ssh-key.cfg
+fi
+  
+SSH_USER=$1
+
+<% if node['serv']['ldap_auth']['ldap_ssh_keys']['allowed_group']  %> 
+if id "${SSH_USER}" | egrep -q "${ALLOWED_GROUP}";
+then
+    logger -t sshd -p info "User $SSH_USER is a member of the group"
+else
+    logger -t sshd -p warn "User $SSH_USER is not allowed to log in, access denied"
+    echo
+    exit 0
+fi
+<% end %>
+  
+KEY=$(ldapsearch -o ldif-wrap=no -S sshPublicKey -c -h "${LDAP_SERVER}" -b "${BASE_DN}" -x -LLL "uid=${SSH_USER}" sshPublicKey | grep -v 'dn:' | perl -pe 's/sshPublicKey: //;')
+  
+logger -t sshd -p info "Sent LDAP SSH public key for user $SSH_USER"
+echo "${KEY}"
